@@ -1,0 +1,329 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flappy Bird - Beautiful Version</title>
+<style>
+  :root {
+    --w: 360px;
+    --h: 640px;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,Roboto,Arial,sans-serif;display:flex;align-items:center;justify-content:center;background:#7ec8f5;}
+  .wrap{width:var(--w);height:var(--h);box-shadow:0 12px 30px rgba(0,0,0,0.25);border-radius:14px;overflow:hidden;position:relative;background:linear-gradient(#70c5ce,#a0e7ff);}
+  canvas{display:block;width:100%;height:100%;}
+  .ui{
+    position:absolute;left:0;right:0;top:0;bottom:0;pointer-events:none;
+  }
+  .center {
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,0.5);
+    pointer-events:auto;
+  }
+  .btn {
+    display:inline-block;background:#ffdd57;color:#222;padding:10px 16px;border-radius:8px;font-weight:700;margin-top:12px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,0.15);
+  }
+  .score {
+    position:absolute;left:12px;top:12px;color:#033649;background:rgba(255,255,255,0.85);padding:6px 10px;border-radius:8px;font-weight:700;box-shadow:0 6px 14px rgba(0,0,0,0.15);
+  }
+  .best {
+    position:absolute;right:12px;top:12px;color:#033649;background:rgba(255,255,255,0.85);padding:6px 10px;border-radius:8px;font-weight:700;
+  }
+  .small {
+    font-size:13px;opacity:0.9;color:#033649;
+  }
+  .tap-hint {
+    position:absolute;left:50%;bottom:70px;transform:translateX(-50%);pointer-events:none;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="360" height="640" aria-label="Flappy Bird game"></canvas>
+    <div class="ui">
+      <div class="score" id="score">Score: 0</div>
+      <div class="best" id="best">Best: 0</div>
+      <div class="center" id="start-screen" style="display:block;pointer-events:auto;">
+        <h1 style="margin:0;font-size:28px">Flappy Bird</h1>
+        <p class="small" style="margin-top:8px">Tap / Click / Press Space to flap</p>
+        <div class="btn" id="startBtn">Start</div>
+      </div>
+      <div class="center" id="gameover-screen" style="display:none;pointer-events:auto;">
+        <h2 style="margin:0;font-size:24px">Game Over</h2>
+        <p class="small" id="finalScore" style="margin:8px 0 0 0">Score: 0</p>
+        <div class="btn" id="retryBtn">Play Again</div>
+      </div>
+      <div class="tap-hint small" id="hint">Tap to flap • Avoid the pipes</div>
+    </div>
+  </div>
+
+<script>
+/* Enhanced Flappy Bird - single file, no external assets */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width;
+const H = canvas.height;
+
+let frames = 0;
+let state = 'getReady'; // getReady, playing, over
+
+// Controls
+function flap() {
+  if (state === 'getReady') {
+    state = 'playing';
+    audioTap();
+  } else if (state === 'playing') {
+    bird.flap();
+    audioTap();
+  } else if (state === 'over') {
+    // nothing
+  }
+}
+window.addEventListener('keydown', e => { if (e.code === 'Space') flap(); });
+canvas.addEventListener('mousedown', flap);
+canvas.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, {passive:false});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  state = 'playing';
+  document.getElementById('start-screen').style.display = 'none';
+  audioStart();
+});
+document.getElementById('retryBtn').addEventListener('click', resetGame);
+
+// Simple audio using WebAudio API
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function audioTap(){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(600, audioCtx.currentTime);
+  g.gain.setValueAtTime(0.02, audioCtx.currentTime);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.05);
+}
+function audioHit(){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(120, audioCtx.currentTime);
+  g.gain.setValueAtTime(0.06, audioCtx.currentTime);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.2);
+}
+function audioStart(){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type='triangle';
+  o.frequency.setValueAtTime(320, audioCtx.currentTime);
+  g.gain.setValueAtTime(0.02, audioCtx.currentTime);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.12);
+}
+
+// Background elements
+const sky = { color1:'#70c5ce', color2:'#a0e7ff' };
+const clouds = [];
+for (let i=0;i<6;i++){
+  clouds.push({x: Math.random()*W, y: Math.random()*H*0.4, size:40+Math.random()*60, speed:0.2+Math.random()*0.6});
+}
+
+// Bird
+const bird = {
+  x: 80,
+  y: H/2,
+  r: 14,
+  vy: 0,
+  gravity: 0.32,
+  jump: 5.8,
+  angle: 0,
+  wing:0,
+  flap(){
+    this.vy = -this.jump;
+    this.wing = 6;
+  },
+  update(){
+    if (state === 'getReady'){
+      this.y = H/2 + Math.sin(frames/10)*6;
+      this.angle = Math.sin(frames/10)*0.2;
+      return;
+    }
+    this.vy += this.gravity;
+    this.y += this.vy;
+    if (this.y + this.r >= H - 40) {
+      this.y = H - 40 - this.r;
+      gameOver();
+    }
+    // rotate
+    if (this.vy > 3) this.angle = Math.min(Math.PI/2, this.vy/10);
+    else this.angle = -0.6;
+    if (this.wing>0) this.wing--;
+  },
+  draw(){
+    // body
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    // body circle
+    ctx.fillStyle = '#ffdd57';
+    ctx.beginPath();
+    ctx.ellipse(0,0, this.r*1.1, this.r, 0, 0, Math.PI*2);
+    ctx.fill();
+    // eye
+    ctx.fillStyle='#222';
+    ctx.beginPath(); ctx.arc(6,-4,3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(7,-5,1.2,0,Math.PI*2); ctx.fill();
+    // beak
+    ctx.fillStyle='#ff8a00';
+    ctx.beginPath(); ctx.moveTo(-2,0); ctx.lineTo(-14, -4); ctx.lineTo(-2,6); ctx.closePath(); ctx.fill();
+    // wing (simple)
+    ctx.fillStyle='#f6c84c';
+    const wingShift = Math.sin(this.wing/2)*6;
+    ctx.beginPath(); ctx.ellipse(0,4+wingShift,10,6, Math.PI/4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  },
+  reset(){
+    this.y = H/2; this.vy = 0; this.angle = 0;
+  }
+};
+
+// Pipes
+const pipes = {
+  arr: [],
+  speed: 2.4,
+  gap: 140,
+  w: 56,
+  spawnRate: 110,
+  update(){
+    if (state !== 'playing') return;
+    if (frames % this.spawnRate === 0){
+      const top =  - (80 + Math.random()*140);
+      this.arr.push({x: W, y: top, passed:false});
+      if (this.spawnRate>80) this.spawnRate = Math.max(80, this.spawnRate - 0.3);
+    }
+    for (let i=this.arr.length-1;i>=0;i--){
+      const p = this.arr[i];
+      p.x -= this.speed;
+      // collision
+      if (bird.x + bird.r > p.x && bird.x - bird.r < p.x + this.w) {
+        if (bird.y - bird.r < p.y + (H) || bird.y + bird.r > p.y + (H) - this.gap) {
+          // collide with top or bottom
+          if (!p.crashed) {
+            gameOver();
+            p.crashed = true;
+          }
+        }
+      }
+      if (!p.passed && p.x + this.w < bird.x) {
+        score.value++; p.passed = true; audioTap();
+        if (score.value % 5 === 0) audioStart();
+      }
+      if (p.x + this.w < -10) this.arr.splice(i,1);
+    }
+  },
+  draw(){
+    for (let p of this.arr){
+      // top pipe
+      ctx.fillStyle='#2e8b3a';
+      const topH = p.y + H;
+      ctx.fillRect(p.x, -300, this.w, topH + 300);
+      // bottom pipe
+      ctx.fillRect(p.x, topH + this.gap, this.w, H - (topH + this.gap) + 300);
+      // rim highlight
+      ctx.fillStyle='rgba(255,255,255,0.06)';
+      ctx.fillRect(p.x, topH + this.gap, this.w, 6);
+    }
+  },
+  reset(){ this.arr = []; this.spawnRate = 110; }
+};
+
+// Score
+const score = {
+  value: 0,
+  best: Number(localStorage.getItem('flappy_best') || 0),
+  draw(){
+    document.getElementById('score').textContent = 'Score: ' + this.value;
+    document.getElementById('best').textContent = 'Best: ' + this.best;
+  },
+  reset(){ this.value = 0; }
+};
+
+function gameOver(){
+  if (state !== 'over') {
+    state = 'over';
+    audioHit();
+    document.getElementById('gameover-screen').style.display = 'block';
+    document.getElementById('finalScore').textContent = 'Score: ' + score.value;
+    if (score.value > score.best) {
+      score.best = score.value;
+      localStorage.setItem('flappy_best', score.best);
+    }
+  }
+}
+
+function resetGame(){
+  state = 'getReady';
+  bird.reset();
+  pipes.reset();
+  score.reset();
+  document.getElementById('start-screen').style.display = 'block';
+  document.getElementById('gameover-screen').style.display = 'none';
+}
+
+// Draw background
+function drawBackground(){
+  // sky gradient
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, '#70c5ce');
+  g.addColorStop(1, '#a0e7ff');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H);
+  // clouds
+  for (let c of clouds){
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.ellipse(c.x, c.y, c.size, c.size*0.55, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // ground
+  ctx.fillStyle = '#d9b48f';
+  ctx.fillRect(0, H-40, W, 40);
+  ctx.fillStyle = '#cba97c';
+  ctx.fillRect(0, H-40, W, 8);
+}
+
+// Update clouds
+function updateClouds(){
+  for (let c of clouds){ c.x += c.speed*0.4; if (c.x > W+80) c.x = -80; }
+}
+
+function loop(){
+  frames++;
+  // update
+  bird.update();
+  pipes.update();
+  updateClouds();
+  // draw
+  drawBackground();
+  pipes.draw();
+  bird.draw();
+  // UI draw handled separately
+  score.draw();
+  // state hint
+  if (state === 'getReady'){
+    document.getElementById('hint').style.opacity = 1 - Math.abs(Math.sin(frames/20))*0.6;
+  } else if (state === 'playing'){
+    document.getElementById('hint').style.opacity = 0.2;
+  } else document.getElementById('hint').style.opacity = 0.0;
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+loop();
+</script>
+</body>
+</html>
